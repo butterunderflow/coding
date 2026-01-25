@@ -1,0 +1,4 @@
+(executable
+ (public_name aam_demo)
+ (name main)
+ (libraries aam_demo))

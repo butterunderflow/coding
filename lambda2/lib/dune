@@ -1,0 +1,5 @@
+(library
+ (name lambda2))
+
+(env (dev (flags (:standard -w -8))))
+
