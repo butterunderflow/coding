@@ -1,8 +1,0 @@
-lib: [
-  "_build/install/default/lib/lambda2/META"
-  "_build/install/default/lib/lambda2/dune-package"
-  "_build/install/default/lib/lambda2/opam"
-]
-bin: [
-  "_build/install/default/bin/lambda2"
-]
