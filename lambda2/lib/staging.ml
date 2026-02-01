@@ -12,6 +12,7 @@ module E2 = struct
     | ELam2 of string * expr
     | EApp1 of expr * expr
     | EApp2 of expr * expr
+    | ELift of expr
   [@@deriving sexp]
 end
 
@@ -41,14 +42,14 @@ let fresh () =
   index := !index + 1;
   Printf.sprintf "_x%d" !index
 
-let bind (e : E1.expr) (k : cont) : value =
+let reflect (e : E1.expr) (k : cont) : value =
   match e with
   | EVar _
   | ENum _ ->
       k (VCode e)
   | EIfz _ -> k (VCode e)
   | ELet (_, _, _) ->
-      failwith "Internal error: breaking anf invariants, bind"
+      failwith "Internal error: breaking anf invariants, reflect"
   | EApp _
   | ELam _ ->
       let x = fresh () in
@@ -77,7 +78,7 @@ let rec eval (e : E2.expr) (env : environment) (k : cont) =
   | ELet (x, e1, e2) ->
       eval e1 env (function
           | VCode rhs (* could be a atom expr or a simple expression *) ->
-          bind rhs (fun x_v -> eval e2 ((x, x_v) :: env) k))
+          reflect rhs (fun x_v -> eval e2 ((x, x_v) :: env) k))
   | EIfz1 (e1, e2, e3) ->
       eval e1 env (function VInt cond ->
           if cond = 0 then eval e2 env k else eval e3 env k)
@@ -92,7 +93,13 @@ let rec eval (e : E2.expr) (env : environment) (k : cont) =
           eval e2 env (fun v_e2 ->
               let (VCode func) = v_e1 in
               let (VCode arg) = v_e2 in
-              bind (EApp (func, arg)) k))
+              reflect (EApp (func, arg)) k))
+  | ELift e ->
+      eval e env (function
+        | VInt i -> k (VCode (ENum i))
+        | VClos (env, x, e) ->
+            reflect (ELam (x, reify e ((x, VCode (EVar x)) :: env))) k
+        | VCode e -> reflect e k)
 
 (* evaluate an expression to a code *)
 and reify e env : E1.expr =
