@@ -1,0 +1,4 @@
+(executable
+ (public_name ocaml-playground)
+ (name main)
+ (libraries ocaml_playground))

@@ -1,6 +1,6 @@
 (lang dune 3.20)
 
-(name lambda2)
+(name ocaml-playground)
 
 (generate_opam_files true)
 
@@ -16,7 +16,7 @@
 (documentation https://url/to/documentation)
 
 (package
- (name lambda2)
+ (name ocaml-playground)
  (synopsis "A short synopsis")
  (description "A longer description")
  (depends ocaml)
