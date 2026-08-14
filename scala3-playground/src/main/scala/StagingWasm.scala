@@ -8,6 +8,7 @@ object StagingWasm:
     case Add(left: AST, right: AST)
     case Sub(left: AST, right: AST)
     case Mul(left: AST, right: AST)
+    case Branch(condition: AST, whenTrue: AST, whenFalse: AST)
     case Call(function: String, argument: AST)
 
   final case class Function(name: String, body: AST)
@@ -24,6 +25,11 @@ object StagingWasm:
       case AST.Add(left, right)      => evaluate(left, parameter) + evaluate(right, parameter)
       case AST.Sub(left, right) => evaluate(left, parameter) - evaluate(right, parameter)
       case AST.Mul(left, right) => evaluate(left, parameter) * evaluate(right, parameter)
+      case AST.Branch(condition, whenTrue, whenFalse) =>
+        if evaluate(condition, parameter) != 0 then
+          evaluate(whenTrue, parameter)
+        else
+          evaluate(whenFalse, parameter)
       case AST.Call(name, argument)  =>
         val callee = lookup(functionMap, name)
         val calleeInput = evaluate(argument, parameter)
@@ -47,28 +53,30 @@ object StagingWasm:
         boundArg.getOrElse:
           quotes.reflect.report.errorAndAbort("A function parameter cannot appear outside a function")
       case AST.Add(leftExpr, rightExpr) =>
-        val left = eval(leftExpr, boundArg)
-        val right = eval(rightExpr, boundArg)
         '{
-          val leftRes = $left
-          val rightRes = $right
-          leftRes + rightRes
+          val left = ${eval(leftExpr, boundArg)}
+          val right = ${eval(rightExpr, boundArg)}
+          left + right
         }
       case AST.Sub(leftExpr, rightExpr) =>
-        val left = eval(leftExpr, boundArg)
-        val right = eval(rightExpr, boundArg)
         '{
-          val leftRes = $left
-          val rightRes = $right
-          leftRes - rightRes
+          val left = ${eval(leftExpr, boundArg)}
+          val right = ${eval(rightExpr, boundArg)}
+          left - right
         }
       case AST.Mul(leftExpr, rightExpr) =>
-        val left = eval(leftExpr, boundArg)
-        val right = eval(rightExpr, boundArg)
         '{
-          val leftRes = $left
-          val rightRes = $right
-          leftRes * rightRes
+          val left = ${eval(leftExpr, boundArg)}
+          val right = ${eval(rightExpr, boundArg)}
+          left * right
+        }
+      case AST.Branch(conditionExpr, whenTrueExpr, whenFalseExpr) =>
+        '{
+          val condition = ${eval(conditionExpr, boundArg)}
+          if condition != 0 then
+            ${eval(whenTrueExpr, boundArg)}
+          else
+            ${eval(whenFalseExpr, boundArg)}
         }
       case AST.Call(name, argExpr) =>
         val callee = lookup(funcNameDict, name)
@@ -99,28 +107,30 @@ object StagingWasm:
         boundArg.getOrElse:
           quotes.reflect.report.errorAndAbort("A function parameter cannot appear outside a function")
       case AST.Add(leftExpr, rightExpr) =>
-        val left = eval(leftExpr, memo, boundArg)
-        val right = eval(rightExpr, memo, boundArg)
         '{
-          val leftRes = $left
-          val rightRes = $right
-          leftRes + rightRes
+          val left = ${eval(leftExpr, memo, boundArg)}
+          val right = ${eval(rightExpr, memo, boundArg)}
+          left + right
         }
       case AST.Sub(leftExpr, rightExpr) =>
-        val left = eval(leftExpr, memo, boundArg)
-        val right = eval(rightExpr, memo, boundArg)
         '{
-          val leftRes = $left
-          val rightRes = $right
-          leftRes - rightRes
+          val left = ${eval(leftExpr, memo, boundArg)}
+          val right = ${eval(rightExpr, memo, boundArg)}
+          left - right
         }
       case AST.Mul(leftExpr, rightExpr) =>
-        val left = eval(leftExpr, memo, boundArg)
-        val right = eval(rightExpr, memo, boundArg)
         '{
-          val leftRes = $left
-          val rightRes = $right
-          leftRes * rightRes
+          val left = ${eval(leftExpr, memo, boundArg)}
+          val right = ${eval(rightExpr, memo, boundArg)}
+          left * right
+        }
+      case AST.Branch(conditionExpr, whenTrueExpr, whenFalseExpr) =>
+        '{
+          val condition = ${eval(conditionExpr, memo, boundArg)}
+          if condition != 0 then
+            ${eval(whenTrueExpr, memo, boundArg)}
+          else
+            ${eval(whenFalseExpr, memo, boundArg)}
         }
       case AST.Call(name, argExpr) =>
         val calleeDef = lookup(funcNameDict, name)
@@ -147,6 +157,14 @@ object StagingWasm:
           }
       loop(mod.functions, memo)
     
+    // This definition doesn't work, will duplicate the memo's definition every time it's used
+    // val memo = {
+    //   val initMemo = '{
+    //     Map.empty[String, (Int, Memo) => Int]
+    //   }
+    //   evalModule(module, initMemo)
+    // }
+    // eval(expression, memo, None)
 
     '{
       val initMemo = Map.empty[String, (Int, Memo) => Int]
