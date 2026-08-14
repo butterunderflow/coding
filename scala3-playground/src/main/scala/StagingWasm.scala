@@ -1,17 +1,16 @@
-import scala.quoted.Quotes
+import scala.quoted.{Quotes, Expr}
 
 object StagingWasm:
 
-  enum Expr:
+  enum AST:
     case Const(value: Int)
-    case Parameter
-    case Add(left: Expr, right: Expr)
-    case Subtract(left: Expr, right: Expr)
-    case Multiply(left: Expr, right: Expr)
-    case Call(function: String, argument: Expr)
+    case Parameter // we support function with only zero or one parameter
+    case Add(left: AST, right: AST)
+    case Sub(left: AST, right: AST)
+    case Mul(left: AST, right: AST)
+    case Call(function: String, argument: AST)
 
-  final case class Function(name: String, output: Expr => Expr):
-    def apply(input: Expr): Expr = output(input)
+  final case class Function(name: String, body: AST)
 
   final case class Module(functions: List[Function])
 
@@ -19,64 +18,141 @@ object StagingWasm:
   def exec(module: Module, function: String, input: Int): Int =
     val functionMap = moduleIndexMap(module)
 
-    def evaluate(expression: Expr, parameter: Int): Int = expression match
-      case Expr.Const(value)          => value
-      case Expr.Parameter             => parameter
-      case Expr.Add(left, right)      => evaluate(left, parameter) + evaluate(right, parameter)
-      case Expr.Subtract(left, right) => evaluate(left, parameter) - evaluate(right, parameter)
-      case Expr.Multiply(left, right) => evaluate(left, parameter) * evaluate(right, parameter)
-      case Expr.Call(name, argument)  =>
+    def evaluate(expression: AST, parameter: Int): Int = expression match
+      case AST.Const(value)          => value
+      case AST.Parameter             => parameter
+      case AST.Add(left, right)      => evaluate(left, parameter) + evaluate(right, parameter)
+      case AST.Sub(left, right) => evaluate(left, parameter) - evaluate(right, parameter)
+      case AST.Mul(left, right) => evaluate(left, parameter) * evaluate(right, parameter)
+      case AST.Call(name, argument)  =>
         val callee = lookup(functionMap, name)
         val calleeInput = evaluate(argument, parameter)
-        evaluate(callee(Expr.Parameter), calleeInput)
+        evaluate(callee.body, calleeInput)
 
     val entry = lookup(functionMap, function)
-    evaluate(entry(Expr.Parameter), input)
+    evaluate(entry.body, input)
 
   def compile0(
-      expression: Expr,
+      expression: AST,
       module: Module
-  )(using quotes: Quotes): scala.quoted.Expr[Int] =
-    val funcNameDic = moduleIndexMap(module)
+  )(using quotes: Quotes): Expr[Int] =
+    val funcNameDict = moduleIndexMap(module)
 
     def eval(
-        expression: Expr,
-        parameter: Option[scala.quoted.Expr[Int]]
-    ): scala.quoted.Expr[Int] = expression match
-      case Expr.Const(value) => scala.quoted.Expr(value)
-      case Expr.Parameter =>
-        parameter.getOrElse:
+        expression: AST,
+        boundArg: Option[Expr[Int]]
+    ): Expr[Int] = expression match
+      case AST.Const(value) => Expr(value)
+      case AST.Parameter =>
+        boundArg.getOrElse:
           quotes.reflect.report.errorAndAbort("A function parameter cannot appear outside a function")
-      case Expr.Add(left, right) =>
-        val stagedLeft = eval(left, parameter)
-        val stagedRight = eval(right, parameter)
+      case AST.Add(leftExpr, rightExpr) =>
+        val left = eval(leftExpr, boundArg)
+        val right = eval(rightExpr, boundArg)
         '{
-          val leftResult = $stagedLeft
-          val rightResult = $stagedRight
-          leftResult + rightResult
+          val leftRes = $left
+          val rightRes = $right
+          leftRes + rightRes
         }
-      case Expr.Subtract(left, right) =>
-        val stagedLeft = eval(left, parameter)
-        val stagedRight = eval(right, parameter)
+      case AST.Sub(leftExpr, rightExpr) =>
+        val left = eval(leftExpr, boundArg)
+        val right = eval(rightExpr, boundArg)
         '{
-          val leftResult = $stagedLeft
-          val rightResult = $stagedRight
-          leftResult - rightResult
+          val leftRes = $left
+          val rightRes = $right
+          leftRes - rightRes
         }
-      case Expr.Multiply(left, right) =>
-        val stagedLeft = eval(left, parameter)
-        val stagedRight = eval(right, parameter)
+      case AST.Mul(leftExpr, rightExpr) =>
+        val left = eval(leftExpr, boundArg)
+        val right = eval(rightExpr, boundArg)
         '{
-          val leftResult = $stagedLeft
-          val rightResult = $stagedRight
-          leftResult * rightResult
+          val leftRes = $left
+          val rightRes = $right
+          leftRes * rightRes
         }
-      case Expr.Call(name, argument) =>
-        val callee = lookup(funcNameDic, name)
-        val stagedArgument = eval(argument, parameter)
-        eval(callee(Expr.Parameter), Some(stagedArgument))
+      case AST.Call(name, argExpr) =>
+        val callee = lookup(funcNameDict, name)
+        val argVal = eval(argExpr, boundArg)
+        eval(callee.body, Some(argVal))
 
     eval(expression, None)
+
+  type Memo = Map[String, (Int, Memo) => Int]
+
+  def lift(value: String)(using Quotes): scala.quoted.Expr[String] = {
+    scala.quoted.Expr(value)
+  }
+
+  def compile1(
+      expression: AST,
+      module: Module
+  )(using quotes: Quotes): Expr[Int] =
+    val funcNameDict = moduleIndexMap(module)
+
+    def eval(
+        expression: AST,
+        memo: Expr[Memo],
+        boundArg: Option[Expr[Int]]
+    ): Expr[Int] = expression match
+      case AST.Const(value) => Expr(value)
+      case AST.Parameter =>
+        boundArg.getOrElse:
+          quotes.reflect.report.errorAndAbort("A function parameter cannot appear outside a function")
+      case AST.Add(leftExpr, rightExpr) =>
+        val left = eval(leftExpr, memo, boundArg)
+        val right = eval(rightExpr, memo, boundArg)
+        '{
+          val leftRes = $left
+          val rightRes = $right
+          leftRes + rightRes
+        }
+      case AST.Sub(leftExpr, rightExpr) =>
+        val left = eval(leftExpr, memo, boundArg)
+        val right = eval(rightExpr, memo, boundArg)
+        '{
+          val leftRes = $left
+          val rightRes = $right
+          leftRes - rightRes
+        }
+      case AST.Mul(leftExpr, rightExpr) =>
+        val left = eval(leftExpr, memo, boundArg)
+        val right = eval(rightExpr, memo, boundArg)
+        '{
+          val leftRes = $left
+          val rightRes = $right
+          leftRes * rightRes
+        }
+      case AST.Call(name, argExpr) =>
+        val calleeDef = lookup(funcNameDict, name)
+        '{
+          val calleeFunc = $memo(${lift(name)})
+          val argVal = ${eval(argExpr, memo, boundArg)}
+          calleeFunc(argVal, $memo)
+        }
+
+    def evalModule(
+        mod: Module,
+        memo: Expr[Memo]
+    ): Expr[Memo] = 
+      def loop(funcs: List[Function], memo: Expr[Memo]): Expr[Memo] = funcs match
+        case Nil => '{
+          val finalMemo = $memo
+          finalMemo
+        }
+        case func :: rest =>
+          '{
+            val updatedMemo = 
+              $memo + (${lift(func.name)} -> ((arg: Int, m: Memo) => ${eval(func.body, 'm, Some('arg))}))
+            ${loop(rest, 'updatedMemo)}
+          }
+      loop(mod.functions, memo)
+    
+
+    '{
+      val initMemo = Map.empty[String, (Int, Memo) => Int]
+      val finalMemo = ${evalModule(module, 'initMemo)}
+      ${eval(expression, 'finalMemo, None)}
+    }
 
   private def moduleIndexMap(module: Module): Map[String, Function] =
     val duplicateNames = module.functions.groupBy(_.name).collect:

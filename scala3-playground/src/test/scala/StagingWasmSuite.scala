@@ -1,9 +1,18 @@
 import scala.quoted.staging
+import scala.quoted.Quotes
 import java.util.concurrent.atomic.AtomicReference
 
 class StagingWasmSuite extends munit.FunSuite:
   import StagingWasm.*
-  import StagingWasm.Expr.*
+  import StagingWasm.AST.*
+
+  private def showCompact(expression: scala.quoted.Expr[?])(using Quotes): String =
+    expression.show
+      .replace("scala.Predef.", "")
+      .replace("scala.collection.immutable.", "")
+      .replace("scala.", "")
+      .replace("java.lang.", "")
+      .replace("StagingWasm.", "")
 
   private def expectStackOverflowWithin(timeoutMillis: Long)(body: => Any): Unit =
     val failure = AtomicReference[Throwable]()
@@ -27,13 +36,13 @@ class StagingWasmSuite extends munit.FunSuite:
     val expr = Add(Const(20), Const(1))
     val mod = Module(Nil)
     val generatedExpression = staging.withQuotes {
-      compile0(expr, mod).show
+      showCompact(compile0(expr, mod))
     }
     val expected =
       """{
-        |  val leftResult: scala.Int = 20
-        |  val rightResult: scala.Int = 1
-        |  leftResult.+(rightResult)
+        |  val leftRes: Int = 20
+        |  val rightRes: Int = 1
+        |  leftRes.+(rightRes)
         |}""".stripMargin
 
     println(generatedExpression)
@@ -43,24 +52,24 @@ class StagingWasmSuite extends munit.FunSuite:
     given staging.Compiler = staging.Compiler.make(getClass.getClassLoader)
     val expr = Call("double", Add(Const(20), Const(1)))
     val mod = Module(List(
-      Function("double", value => Add(value, value))
+      Function("double", Add(Parameter, Parameter))
     ))
     val generatedExpression = staging.withQuotes {
-      compile0(expr, mod).show
+      showCompact(compile0(expr, mod))
     }
     val expected =
       """{
-        |  val leftResult: scala.Int = {
-        |    val `leftResult₂`: scala.Int = 20
-        |    val rightResult: scala.Int = 1
-        |    `leftResult₂`.+(rightResult)
+        |  val leftRes: Int = {
+        |    val `leftRes₂`: Int = 20
+        |    val rightRes: Int = 1
+        |    `leftRes₂`.+(rightRes)
         |  }
-        |  val `rightResult₂`: scala.Int = {
-        |    val `leftResult₃`: scala.Int = 20
-        |    val `rightResult₃`: scala.Int = 1
-        |    `leftResult₃`.+(`rightResult₃`)
+        |  val `rightRes₂`: Int = {
+        |    val `leftRes₃`: Int = 20
+        |    val `rightRes₃`: Int = 1
+        |    `leftRes₃`.+(`rightRes₃`)
         |  }
-        |  leftResult.+(`rightResult₂`)
+        |  leftRes.+(`rightRes₂`)
         |}""".stripMargin
 
     println(generatedExpression)
@@ -68,13 +77,13 @@ class StagingWasmSuite extends munit.FunSuite:
 
   test("divergent"):
     given staging.Compiler = staging.Compiler.make(getClass.getClassLoader)
-    val expr = Call("fib", Const(3))
+    val expr = Call("fakeFib", Const(3))
     val mod = Module(List(
       Function(
-        "fib",
-        value => Add(
-          Call("fib", Subtract(value, Const(1))),
-          Call("fib", Subtract(value, Const(2)))
+        "fakeFib",
+        Add(
+          Call("fakeFib", Sub(Parameter, Const(1))),
+          Call("fakeFib", Sub(Parameter, Const(2)))
         )
       )
     ))
@@ -84,3 +93,56 @@ class StagingWasmSuite extends munit.FunSuite:
         compile0(expr, mod)
       }
     }
+
+  test("tying the knots"):
+    given staging.Compiler = staging.Compiler.make(getClass.getClassLoader)
+    val expr = Call("fakeFib", Const(3))
+    val mod = Module(List(
+      Function(
+        "fakeFib",
+        Add(
+          Call("fakeFib", Sub(Parameter, Const(1))),
+          Call("fakeFib", Sub(Parameter, Const(2)))
+        )
+      )
+    ))
+
+    val generatedExpression = staging.withQuotes {
+      showCompact(compile1(expr, mod))
+    }
+    val expected =
+      """{
+  val initMemo: Map[String, Function2[Int, Memo, Int]] = Map.empty[String, Function2[Int, Memo, Int]]
+  val finalMemo: Memo = {
+    val updatedMemo: Map[String, Function2[Int, Memo, Int]] = initMemo.+[Function2[Int, Memo, Int]](ArrowAssoc[String]("fakeFib").->[Function2[Int, Memo, Int]](((arg: Int, m: Memo) => {
+      val leftRes: Int = {
+        val calleeFunc: Function2[Int, Memo, Int] = m.apply("fakeFib")
+        val argVal: Int = {
+          val `leftRes₂`: Int = arg
+          val rightRes: Int = 1
+          `leftRes₂`.-(rightRes)
+        }
+        calleeFunc.apply(argVal, m)
+      }
+      val `rightRes₂`: Int = {
+        val `calleeFunc₂`: Function2[Int, Memo, Int] = m.apply("fakeFib")
+        val `argVal₂`: Int = {
+          val `leftRes₃`: Int = arg
+          val `rightRes₃`: Int = 2
+          `leftRes₃`.-(`rightRes₃`)
+        }
+        `calleeFunc₂`.apply(`argVal₂`, m)
+      }
+      leftRes.+(`rightRes₂`)
+    })))
+    val `finalMemo₂`: Memo = updatedMemo
+
+    (`finalMemo₂`: Memo)
+  }
+  val `calleeFunc₃`: Function2[Int, Memo, Int] = finalMemo.apply("fakeFib")
+  val `argVal₃`: Int = 3
+  `calleeFunc₃`.apply(`argVal₃`, finalMemo)
+        |}""".stripMargin
+
+    println(generatedExpression)
+    assertEquals(generatedExpression, expected)
