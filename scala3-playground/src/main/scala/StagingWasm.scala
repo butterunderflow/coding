@@ -1,3 +1,5 @@
+package mspwasm
+
 import scala.quoted.{Quotes, Expr}
 
 // λx. x

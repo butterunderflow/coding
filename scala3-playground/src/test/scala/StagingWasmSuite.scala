@@ -1,3 +1,5 @@
+package mspwasm
+
 import scala.quoted.staging
 import scala.quoted.Quotes
 import java.util.concurrent.atomic.AtomicReference
@@ -13,6 +15,7 @@ class StagingWasmSuite extends munit.FunSuite {
       .replace("scala.", "")
       .replace("java.lang.", "")
       .replace("StagingWasm.", "")
+      .replace("mspwasm.", "")
   }
 
   private def expectStackOverflowWithin(timeoutMillis: Long)(body: => Any): Unit = {
