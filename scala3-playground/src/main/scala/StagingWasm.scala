@@ -1,5 +1,7 @@
 import scala.quoted.{Quotes, Expr}
 
+// λx. x
+
 object StagingWasm:
 
   enum AST:
@@ -86,6 +88,8 @@ object StagingWasm:
     eval(expression, None)
 
   type Memo = Map[String, (Int, Memo) => Int]
+  // Memo should be Map[String, Expr[Int => Int]]
+
 
   def lift(value: String)(using Quotes): scala.quoted.Expr[String] = {
     scala.quoted.Expr(value)
@@ -133,7 +137,6 @@ object StagingWasm:
             ${eval(whenFalseExpr, memo, boundArg)}
         }
       case AST.Call(name, argExpr) =>
-        val calleeDef = lookup(funcNameDict, name)
         '{
           val calleeFunc = $memo(${lift(name)})
           val argVal = ${eval(argExpr, memo, boundArg)}
